@@ -218,10 +218,10 @@ async def solve_cloudflare_get(
 
 if __name__ == "__main__":
     # Run with: python cf_api.py
-    # Or specify: python cf_api.py --host 0.0.0.0 --port 8000
+    # Render auto-detects the port from PORT env variable
     uvicorn.run(
         app,
-        host="127.0.0.1",
+        host="0.0.0.0",  # Listen on all interfaces (required for Render)
         port=8000,
         log_level="info"
     )
