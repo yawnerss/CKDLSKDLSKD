@@ -4,6 +4,7 @@ import os
 import shutil
 import glob
 import logging
+import subprocess
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,7 +153,8 @@ async def root():
         "endpoints": {
             "POST /solve": "Solve CF challenge and get cookie",
             "GET /solve": "Query parameter version (url, use_cache, timeout)",
-            "GET /health": "Health check"
+            "GET /health": "Health check",
+            "GET /debug": "Debug Chrome path"
         },
         "example": {"url": "https://checkton.online", "use_cache": True, "timeout": 15}
     }
@@ -160,6 +162,40 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.get("/debug")
+async def debug_chrome():
+    # Find all playwright cache files
+    found = glob.glob("/opt/render/.cache/ms-playwright/**/*", recursive=True)
+
+    # Use find command to locate chrome/headless_shell binaries
+    try:
+        result = subprocess.run(
+            ["find", "/opt/render/.cache", "-name", "chrome", "-o", "-name", "headless_shell"],
+            capture_output=True, text=True, timeout=15
+        )
+        find_output = result.stdout
+    except Exception as e:
+        find_output = str(e)
+
+    # Also search home directory
+    try:
+        result2 = subprocess.run(
+            ["find", "/home", "-name", "chrome", "-o", "-name", "headless_shell"],
+            capture_output=True, text=True, timeout=15
+        )
+        find_home = result2.stdout
+    except Exception as e:
+        find_home = str(e)
+
+    return {
+        "cwd": os.getcwd(),
+        "CHROME_PATH_env": os.environ.get("CHROME_PATH", "not set"),
+        "playwright_files_sample": found[:50],
+        "find_render_cache": find_output,
+        "find_home": find_home,
+        "get_chrome_path_result": get_chrome_path()
+    }
 
 @app.post("/solve", response_model=CookieResponse)
 async def solve_cloudflare(request: SolveRequest):
