@@ -5,6 +5,7 @@ import shutil
 import glob
 import logging
 import subprocess
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,10 +19,31 @@ logger = logging.getLogger(__name__)
 
 CACHE_DIR = "chrome_cache"
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Install Playwright Chromium on startup
+    logger.info("🚀 Installing Playwright Chromium on startup...")
+    try:
+        result = subprocess.run(
+            ["python", "-m", "playwright", "install", "chromium"],
+            capture_output=True, text=True, timeout=120
+        )
+        logger.info(f"Playwright install stdout: {result.stdout}")
+        logger.info(f"Playwright install stderr: {result.stderr}")
+        logger.info(f"Playwright install returncode: {result.returncode}")
+        if result.returncode == 0:
+            logger.info("✅ Playwright Chromium installed successfully")
+        else:
+            logger.error("❌ Playwright Chromium install failed")
+    except Exception as e:
+        logger.error(f"❌ Failed to install Playwright Chromium: {e}")
+    yield
+
 app = FastAPI(
     title="Cloudflare Cookie Solver API",
     description="Solves Cloudflare challenges and returns cf_clearance cookies",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -165,10 +187,8 @@ async def health_check():
 
 @app.get("/debug")
 async def debug_chrome():
-    # Find all playwright cache files
     found = glob.glob("/opt/render/.cache/ms-playwright/**/*", recursive=True)
 
-    # Use find command to locate chrome/headless_shell binaries
     try:
         result = subprocess.run(
             ["find", "/opt/render/.cache", "-name", "chrome", "-o", "-name", "headless_shell"],
@@ -178,7 +198,6 @@ async def debug_chrome():
     except Exception as e:
         find_output = str(e)
 
-    # Also search home directory
     try:
         result2 = subprocess.run(
             ["find", "/home", "-name", "chrome", "-o", "-name", "headless_shell"],
