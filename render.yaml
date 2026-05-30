@@ -2,7 +2,7 @@ services:
   - type: web
     name: cloudflare-solver-api
     runtime: image          # <-- important: use Docker runtime
-    repo: https://github.com/yourusername/your-repo
+    repo: https://github.com/yawnerss/CKDLSKDLSKD
     plan: free
     dockerfilePath: ./Dockerfile
     envVars:
