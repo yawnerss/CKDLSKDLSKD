@@ -1,11 +1,23 @@
+import subprocess
 import sys
 import time
 import os
 import shutil
 import glob
 import logging
-import subprocess
-from contextlib import asynccontextmanager
+
+# ============================================================
+# Install Playwright Chromium at startup (before anything else)
+# ============================================================
+print("🚀 Installing Playwright Chromium...", flush=True)
+_result = subprocess.run(
+    ["python", "-m", "playwright", "install", "chromium"],
+    capture_output=True, text=True, timeout=120
+)
+print("PLAYWRIGHT STDOUT:", _result.stdout, flush=True)
+print("PLAYWRIGHT STDERR:", _result.stderr, flush=True)
+print("PLAYWRIGHT RETURN CODE:", _result.returncode, flush=True)
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,31 +31,10 @@ logger = logging.getLogger(__name__)
 
 CACHE_DIR = "chrome_cache"
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Install Playwright Chromium on startup
-    logger.info("🚀 Installing Playwright Chromium on startup...")
-    try:
-        result = subprocess.run(
-            ["python", "-m", "playwright", "install", "chromium"],
-            capture_output=True, text=True, timeout=120
-        )
-        logger.info(f"Playwright install stdout: {result.stdout}")
-        logger.info(f"Playwright install stderr: {result.stderr}")
-        logger.info(f"Playwright install returncode: {result.returncode}")
-        if result.returncode == 0:
-            logger.info("✅ Playwright Chromium installed successfully")
-        else:
-            logger.error("❌ Playwright Chromium install failed")
-    except Exception as e:
-        logger.error(f"❌ Failed to install Playwright Chromium: {e}")
-    yield
-
 app = FastAPI(
     title="Cloudflare Cookie Solver API",
     description="Solves Cloudflare challenges and returns cf_clearance cookies",
-    version="1.0.0",
-    lifespan=lifespan
+    version="1.0.0"
 )
 
 app.add_middleware(
@@ -78,7 +69,9 @@ def get_chrome_path():
         glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
         glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell") +
         glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux/chrome", recursive=True) +
-        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome")
+        glob.glob("/home/**/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell", recursive=True) +
+        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
+        glob.glob("/root/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell")
     )
     for p in playwright_paths:
         if os.path.exists(p):
@@ -187,32 +180,29 @@ async def health_check():
 
 @app.get("/debug")
 async def debug_chrome():
-    found = glob.glob("/opt/render/.cache/ms-playwright/**/*", recursive=True)
-
+    # Search everywhere for chrome/headless_shell
     try:
         result = subprocess.run(
-            ["find", "/opt/render/.cache", "-name", "chrome", "-o", "-name", "headless_shell"],
-            capture_output=True, text=True, timeout=15
+            ["find", "/", "-name", "headless_shell", "-o", "-name", "chrome"],
+            capture_output=True, text=True, timeout=30
         )
         find_output = result.stdout
     except Exception as e:
         find_output = str(e)
 
     try:
-        result2 = subprocess.run(
-            ["find", "/home", "-name", "chrome", "-o", "-name", "headless_shell"],
-            capture_output=True, text=True, timeout=15
-        )
-        find_home = result2.stdout
+        whoami = subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip()
+        env_home = os.environ.get("HOME", "not set")
     except Exception as e:
-        find_home = str(e)
+        whoami = str(e)
+        env_home = ""
 
     return {
         "cwd": os.getcwd(),
+        "whoami": whoami,
+        "HOME_env": env_home,
         "CHROME_PATH_env": os.environ.get("CHROME_PATH", "not set"),
-        "playwright_files_sample": found[:50],
-        "find_render_cache": find_output,
-        "find_home": find_home,
+        "find_all": find_output,
         "get_chrome_path_result": get_chrome_path()
     }
 
