@@ -95,15 +95,19 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
     if not chrome_path:
         raise Exception("Chrome binary not found. Please set CHROME_PATH environment variable.")
 
+    # Make it executable and set environment variable for SeleniumBase
     os.chmod(chrome_path, 0o755)
     os.environ['CHROME_PATH'] = chrome_path
+
+    logger.info(f"🚀 Launching Driver with chrome: {chrome_path}")
 
     driver = Driver(
         uc=True,
         headless=True,
         user_data_dir=CACHE_DIR,
         disable_gpu=True,
-        no_sandbox=True
+        no_sandbox=True,
+        binary_location=chrome_path
     )
 
     try:
