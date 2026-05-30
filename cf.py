@@ -64,21 +64,23 @@ def get_chrome_path():
         logger.info(f"✅ Chrome found via CHROME_PATH: {chrome_path}")
         return chrome_path
 
-    # 2. Auto-detect Playwright Chromium (handles version number changes)
+    # 2. Auto-detect Playwright Chromium
     playwright_paths = (
+        glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux64/chrome") +
         glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
+        glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-headless-shell-linux64/chrome-headless-shell") +
         glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell") +
+        glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux64/chrome", recursive=True) +
         glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux/chrome", recursive=True) +
-        glob.glob("/home/**/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell", recursive=True) +
-        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
-        glob.glob("/root/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell")
+        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux64/chrome") +
+        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome")
     )
     for p in playwright_paths:
         if os.path.exists(p):
             logger.info(f"✅ Chrome found via Playwright cache: {p}")
             return p
 
-    # 3. Try relative path (./chrome/chrome-linux64/chrome)
+    # 3. Try relative path
     rel_path = os.path.join(os.getcwd(), "chrome", "chrome-linux64", "chrome")
     if os.path.exists(rel_path):
         logger.info(f"✅ Chrome found at: {rel_path}")
@@ -180,7 +182,6 @@ async def health_check():
 
 @app.get("/debug")
 async def debug_chrome():
-    # Search everywhere for chrome/headless_shell
     try:
         result = subprocess.run(
             ["find", "/", "-name", "headless_shell", "-o", "-name", "chrome"],
