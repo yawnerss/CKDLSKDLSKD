@@ -2,12 +2,17 @@ import sys
 import time
 import os
 import shutil
+import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from seleniumbase import Driver
 import uvicorn
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 CACHE_DIR = "chrome_cache"
 
@@ -17,7 +22,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,92 +41,89 @@ class SolveRequest(BaseModel):
     use_cache: bool = True
     timeout: int = 30
 
+def get_chrome_path():
+    """Determine Chrome binary location with fallbacks."""
+    # 1. Check environment variable
+    chrome_path = os.environ.get("CHROME_PATH")
+    if chrome_path and os.path.exists(chrome_path):
+        logger.info(f"✅ Chrome found via CHROME_PATH: {chrome_path}")
+        return chrome_path
+    
+    # 2. Try relative path (./chrome/chrome-linux64/chrome)
+    rel_path = os.path.join(os.getcwd(), "chrome", "chrome-linux64", "chrome")
+    if os.path.exists(rel_path):
+        logger.info(f"✅ Chrome found at: {rel_path}")
+        return rel_path
+    
+    # 3. Try system‑wide Chrome
+    system_paths = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium"
+    ]
+    for p in system_paths:
+        if os.path.exists(p):
+            logger.info(f"✅ Chrome found at system path: {p}")
+            return p
+    
+    logger.error("❌ Chrome binary not found")
+    return None
+
 def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, debug: bool = False) -> tuple:
-    """
-    Solve Cloudflare challenge and extract cf_clearance cookie + final URL.
-    Returns tuple of (cookie_value, final_url) or raises exception on failure.
-    """
     if not use_cache and os.path.exists(CACHE_DIR):
         shutil.rmtree(CACHE_DIR)
-    
     os.makedirs(CACHE_DIR, exist_ok=True)
     
-    # ---- Read Chrome path from environment variable ----
-    chrome_path = os.environ.get("CHROME_PATH")
-    driver_kwargs = {
-        "uc": True,
-        "headless": True,
-        "user_data_dir": CACHE_DIR,
-        "disable_gpu": True,
-        "no_sandbox": True
-    }
-    if chrome_path and os.path.exists(chrome_path):
-        driver_kwargs["chrome_path"] = chrome_path
-        if debug:
-            print(f"[DEBUG] Using Chrome at: {chrome_path}")
-    else:
-        if debug:
-            print("[DEBUG] CHROME_PATH not set or invalid, relying on system PATH")
+    chrome_path = get_chrome_path()
+    if not chrome_path:
+        raise Exception("Chrome binary not found. Please set CHROME_PATH environment variable.")
     
-    driver = Driver(**driver_kwargs)
+    # Make it executable and set environment variable for SeleniumBase
+    os.chmod(chrome_path, 0o755)
+    os.environ['CHROME_PATH'] = chrome_path   # <-- key fix
+    
+    driver = Driver(
+        uc=True,
+        headless=True,
+        user_data_dir=CACHE_DIR,
+        disable_gpu=True,
+        no_sandbox=True
+    )
     
     try:
         start_time = time.time()
         if debug:
-            print(f"[DEBUG] Opening URL: {url}")
+            logger.info(f"Opening URL: {url}")
         
         driver.uc_open_with_reconnect(url, reconnect_time=0.5)
         
-        # Poll for cf_clearance with optimized timing
         poll_count = 0
         while time.time() - start_time < timeout:
             poll_count += 1
-            
             try:
                 current_title = driver.title or ""
                 current_url = driver.current_url or ""
                 
                 if debug and poll_count % 50 == 0:
                     elapsed = time.time() - start_time
-                    print(f"[DEBUG] {elapsed:.1f}s - Title: {current_title[:50]}")
+                    logger.debug(f"{elapsed:.1f}s - Title: {current_title[:50]}")
                 
-                # Check if challenge is complete (multiple conditions)
-                challenge_complete = (
-                    current_title and 
-                    "Just a moment" not in current_title and
-                    "Challenge" not in current_title and
-                    len(current_title) > 0
-                )
-                
-                if challenge_complete:
+                if current_title and "Just a moment" not in current_title and "Challenge" not in current_title and len(current_title) > 0:
                     cookies = driver.get_cookies()
-                    
-                    # Find cf_clearance cookie
                     for c in cookies:
                         if c['name'] == 'cf_clearance':
                             final_url = driver.current_url
                             if debug:
-                                print(f"[DEBUG] ✅ Challenge solved in {time.time() - start_time:.1f}s")
+                                logger.info(f"✅ Solved in {time.time() - start_time:.1f}s")
                             return c['value'], final_url
-                
             except Exception as e:
                 if debug:
-                    print(f"[DEBUG] Poll error: {str(e)}")
-                pass
-            
+                    logger.debug(f"Poll error: {str(e)}")
             time.sleep(0.01)
         
-        # Timeout - get current state for debugging
-        try:
-            final_title = driver.title or "No title"
-            final_url = driver.current_url or "No URL"
-            raise TimeoutError(
-                f"Cloudflare challenge timeout after {timeout}s. "
-                f"Last title: '{final_title}' | URL: {final_url}"
-            )
-        except:
-            raise TimeoutError(f"Cloudflare challenge timeout after {timeout} seconds")
-        
+        final_title = driver.title or "No title"
+        final_url = driver.current_url or "No URL"
+        raise TimeoutError(f"Timeout after {timeout}s. Last title: '{final_title}' | URL: {final_url}")
     except Exception as e:
         raise Exception(f"Error solving Cloudflare challenge: {str(e)}")
     finally:
@@ -133,7 +134,6 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
 
 @app.get("/")
 async def root():
-    """API documentation"""
     return {
         "message": "Cloudflare Cookie Solver API",
         "endpoints": {
@@ -141,52 +141,28 @@ async def root():
             "GET /solve": "Query parameter version (url, use_cache, timeout)",
             "GET /health": "Health check"
         },
-        "example": {
-            "url": "https://checkton.online",
-            "use_cache": True,
-            "timeout": 15
-        }
+        "example": {"url": "https://checkton.online", "use_cache": True, "timeout": 15}
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy"}
 
 @app.post("/solve", response_model=CookieResponse)
 async def solve_cloudflare(request: SolveRequest):
-    """
-    POST endpoint to solve Cloudflare challenge
-    
-    Request body:
-    {
-        "url": "https://example.com",
-        "use_cache": true,
-        "timeout": 30
-    }
-    """
     try:
         if not request.url.startswith(('http://', 'https://')):
             raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
-        
         cookie, final_url = get_cloudflare_cookie(
             url=request.url,
             use_cache=request.use_cache,
             timeout=request.timeout,
             debug=False
         )
-        
-        return CookieResponse(
-            success=True,
-            cookie=cookie,
-            url=final_url
-        )
-    
+        return CookieResponse(success=True, cookie=cookie, url=final_url)
     except Exception as e:
-        return CookieResponse(
-            success=False,
-            error=str(e)
-        )
+        logger.exception("POST /solve error")
+        return CookieResponse(success=False, error=str(e))
 
 @app.get("/solve", response_model=CookieResponse)
 async def solve_cloudflare_get(
@@ -194,45 +170,20 @@ async def solve_cloudflare_get(
     use_cache: bool = Query(True, description="Use browser cache"),
     timeout: int = Query(30, description="Timeout in seconds")
 ):
-    """
-    GET endpoint to solve Cloudflare challenge
-    
-    Query parameters:
-    - url: Target URL (required)
-    - use_cache: Use browser cache (default: true)
-    - timeout: Timeout in seconds (default: 30)
-    
-    Example: /solve?url=https://checkton.online&timeout=30
-    """
     try:
         if not url.startswith(('http://', 'https://')):
             raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
-        
         cookie, final_url = get_cloudflare_cookie(
             url=url,
             use_cache=use_cache,
             timeout=timeout,
             debug=False
         )
-        
-        return CookieResponse(
-            success=True,
-            cookie=cookie,
-            url=final_url
-        )
-    
+        return CookieResponse(success=True, cookie=cookie, url=final_url)
     except Exception as e:
-        return CookieResponse(
-            success=False,
-            error=str(e)
-        )
+        logger.exception("GET /solve error")
+        return CookieResponse(success=False, error=str(e))
 
 if __name__ == "__main__":
-    # Render automatically sets the PORT environment variable
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(
-        app,
-        host="0.0.0.0",      # Listen on all interfaces (required for Render)
-        port=port,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
