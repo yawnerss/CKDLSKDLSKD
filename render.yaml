@@ -1,10 +1,13 @@
 services:
   - type: web
     name: cloudflare-solver-api
-    runtime: python
-    runtimeVersion: '3.11'
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn cf_api:app --host 0.0.0.0 --port $PORT
+    runtime: image  # Use Docker instead of native Python
+    repo: https://github.com/yawnerss/CKDLSKDLSKD/ # replace with your repo URL
+    plan: free
+    dockerfilePath: ./Dockerfile
     envVars:
       - key: PYTHON_VERSION
         value: 3.11
+      # Optional: increase timeout for long challenges
+      - key: UVICORN_TIMEOUT
+        value: 120
