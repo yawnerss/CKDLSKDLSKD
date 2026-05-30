@@ -1,13 +1,30 @@
 services:
   - type: web
     name: cloudflare-solver-api
-    runtime: image  # Use Docker instead of native Python
-    repo: https://github.com/yawnerss/CKDLSKDLSKD/ # replace with your repo URL
-    plan: free
-    dockerfilePath: ./Dockerfile
+    runtime: python
+    runtimeVersion: '3.12'
+    buildCommand: |
+      apt-get update && apt-get install -y \
+        chromium-browser \
+        chromium-codecs-ffmpeg \
+        libxss1 \
+        libappindicator1 \
+        libindicator7 \
+        fonts-liberation \
+        libnss3 \
+        lsb-release \
+        xdg-utils \
+        libgbm1 \
+        wget \
+        && pip install --upgrade pip setuptools wheel \
+        && pip install -r requirements.txt
+    startCommand: uvicorn cf_api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11
-      # Optional: increase timeout for long challenges
-      - key: UVICORN_TIMEOUT
-        value: 120
+        value: 3.12
+      - key: PORT
+        value: 8000
+      - key: SB_NO_SANDBOX
+        value: "true"
+      - key: DISPLAY
+        value: ":99"
