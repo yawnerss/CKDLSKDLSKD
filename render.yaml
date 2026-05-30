@@ -1,1 +1,4 @@
 buildCommand: /opt/render/project/src/.venv/bin/pip install --upgrade pip && /opt/render/project/src/.venv/bin/pip install -r requirements.txt && /opt/render/project/src/.venv/bin/pip install playwright && PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/browsers /opt/render/project/src/.venv/bin/python -m playwright install chromium
+envVars:
+  - key: PLAYWRIGHT_BROWSERS_PATH
+    value: /opt/render/project/src/browsers
