@@ -6,18 +6,6 @@ import shutil
 import glob
 import logging
 
-# ============================================================
-# Install Playwright Chromium at startup (before anything else)
-# ============================================================
-print("🚀 Installing Playwright Chromium...", flush=True)
-_result = subprocess.run(
-    ["python", "-m", "playwright", "install", "chromium"],
-    capture_output=True, text=True, timeout=120
-)
-print("PLAYWRIGHT STDOUT:", _result.stdout, flush=True)
-print("PLAYWRIGHT STDERR:", _result.stderr, flush=True)
-print("PLAYWRIGHT RETURN CODE:", _result.returncode, flush=True)
-
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,20 +59,18 @@ def get_chrome_path():
         glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-headless-shell-linux64/chrome-headless-shell") +
         glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell") +
         glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux64/chrome", recursive=True) +
-        glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux/chrome", recursive=True) +
-        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux64/chrome") +
-        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome")
+        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux64/chrome")
     )
     for p in playwright_paths:
         if os.path.exists(p):
             logger.info(f"✅ Chrome found via Playwright cache: {p}")
             return p
 
-    # 3. Try relative path
-    rel_path = os.path.join(os.getcwd(), "chrome", "chrome-linux64", "chrome")
-    if os.path.exists(rel_path):
-        logger.info(f"✅ Chrome found at: {rel_path}")
-        return rel_path
+    # 3. Hardcoded known path from debug
+    known = "/opt/render/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome"
+    if os.path.exists(known):
+        logger.info(f"✅ Chrome found at hardcoded path: {known}")
+        return known
 
     # 4. Try system-wide Chrome
     system_paths = [
@@ -109,7 +95,6 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
     if not chrome_path:
         raise Exception("Chrome binary not found. Please set CHROME_PATH environment variable.")
 
-    # Make it executable and set environment variable for SeleniumBase
     os.chmod(chrome_path, 0o755)
     os.environ['CHROME_PATH'] = chrome_path
 
@@ -133,7 +118,6 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
             poll_count += 1
             try:
                 current_title = driver.title or ""
-                current_url = driver.current_url or ""
 
                 if debug and poll_count % 50 == 0:
                     elapsed = time.time() - start_time
@@ -184,26 +168,17 @@ async def health_check():
 async def debug_chrome():
     try:
         result = subprocess.run(
-            ["find", "/", "-name", "headless_shell", "-o", "-name", "chrome"],
-            capture_output=True, text=True, timeout=30
+            ["find", "/opt/render/.cache/ms-playwright", "-name", "chrome", "-o", "-name", "chrome-headless-shell"],
+            capture_output=True, text=True, timeout=15
         )
         find_output = result.stdout
     except Exception as e:
         find_output = str(e)
 
-    try:
-        whoami = subprocess.run(["whoami"], capture_output=True, text=True).stdout.strip()
-        env_home = os.environ.get("HOME", "not set")
-    except Exception as e:
-        whoami = str(e)
-        env_home = ""
-
     return {
         "cwd": os.getcwd(),
-        "whoami": whoami,
-        "HOME_env": env_home,
         "CHROME_PATH_env": os.environ.get("CHROME_PATH", "not set"),
-        "find_all": find_output,
+        "find_output": find_output,
         "get_chrome_path_result": get_chrome_path()
     }
 
