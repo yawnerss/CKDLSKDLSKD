@@ -35,7 +35,7 @@ class CookieResponse(BaseModel):
 class SolveRequest(BaseModel):
     url: str
     use_cache: bool = True
-    timeout: int = 30  # Changed from 15 to 30
+    timeout: int = 30
 
 def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, debug: bool = False) -> tuple:
     """
@@ -47,13 +47,24 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
     
     os.makedirs(CACHE_DIR, exist_ok=True)
     
-    driver = Driver(
-        uc=True,
-        headless=True,
-        user_data_dir=CACHE_DIR,
-        disable_gpu=True,
-        no_sandbox=True
-    )
+    # ---- Read Chrome path from environment variable ----
+    chrome_path = os.environ.get("CHROME_PATH")
+    driver_kwargs = {
+        "uc": True,
+        "headless": True,
+        "user_data_dir": CACHE_DIR,
+        "disable_gpu": True,
+        "no_sandbox": True
+    }
+    if chrome_path and os.path.exists(chrome_path):
+        driver_kwargs["chrome_path"] = chrome_path
+        if debug:
+            print(f"[DEBUG] Using Chrome at: {chrome_path}")
+    else:
+        if debug:
+            print("[DEBUG] CHROME_PATH not set or invalid, relying on system PATH")
+    
+    driver = Driver(**driver_kwargs)
     
     try:
         start_time = time.time()
@@ -217,11 +228,11 @@ async def solve_cloudflare_get(
         )
 
 if __name__ == "__main__":
-    # Run with: python cf_api.py
-    # Render auto-detects the port from PORT env variable
+    # Render automatically sets the PORT environment variable
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         app,
-        host="0.0.0.0",  # Listen on all interfaces (required for Render)
-        port=8000,
+        host="0.0.0.0",      # Listen on all interfaces (required for Render)
+        port=port,
         log_level="info"
     )
