@@ -2,6 +2,7 @@ import sys
 import time
 import os
 import shutil
+import glob
 import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -48,14 +49,26 @@ def get_chrome_path():
     if chrome_path and os.path.exists(chrome_path):
         logger.info(f"✅ Chrome found via CHROME_PATH: {chrome_path}")
         return chrome_path
-    
-    # 2. Try relative path (./chrome/chrome-linux64/chrome)
+
+    # 2. Auto-detect Playwright Chromium (handles version number changes)
+    playwright_paths = (
+        glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
+        glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell") +
+        glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux/chrome", recursive=True) +
+        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux/chrome")
+    )
+    for p in playwright_paths:
+        if os.path.exists(p):
+            logger.info(f"✅ Chrome found via Playwright cache: {p}")
+            return p
+
+    # 3. Try relative path (./chrome/chrome-linux64/chrome)
     rel_path = os.path.join(os.getcwd(), "chrome", "chrome-linux64", "chrome")
     if os.path.exists(rel_path):
         logger.info(f"✅ Chrome found at: {rel_path}")
         return rel_path
-    
-    # 3. Try system‑wide Chrome
+
+    # 4. Try system-wide Chrome
     system_paths = [
         "/usr/bin/google-chrome",
         "/usr/bin/chromium-browser",
@@ -65,7 +78,7 @@ def get_chrome_path():
         if os.path.exists(p):
             logger.info(f"✅ Chrome found at system path: {p}")
             return p
-    
+
     logger.error("❌ Chrome binary not found")
     return None
 
@@ -73,15 +86,15 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
     if not use_cache and os.path.exists(CACHE_DIR):
         shutil.rmtree(CACHE_DIR)
     os.makedirs(CACHE_DIR, exist_ok=True)
-    
+
     chrome_path = get_chrome_path()
     if not chrome_path:
         raise Exception("Chrome binary not found. Please set CHROME_PATH environment variable.")
-    
+
     # Make it executable and set environment variable for SeleniumBase
     os.chmod(chrome_path, 0o755)
-    os.environ['CHROME_PATH'] = chrome_path   # <-- key fix
-    
+    os.environ['CHROME_PATH'] = chrome_path
+
     driver = Driver(
         uc=True,
         headless=True,
@@ -89,25 +102,25 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
         disable_gpu=True,
         no_sandbox=True
     )
-    
+
     try:
         start_time = time.time()
         if debug:
             logger.info(f"Opening URL: {url}")
-        
+
         driver.uc_open_with_reconnect(url, reconnect_time=0.5)
-        
+
         poll_count = 0
         while time.time() - start_time < timeout:
             poll_count += 1
             try:
                 current_title = driver.title or ""
                 current_url = driver.current_url or ""
-                
+
                 if debug and poll_count % 50 == 0:
                     elapsed = time.time() - start_time
                     logger.debug(f"{elapsed:.1f}s - Title: {current_title[:50]}")
-                
+
                 if current_title and "Just a moment" not in current_title and "Challenge" not in current_title and len(current_title) > 0:
                     cookies = driver.get_cookies()
                     for c in cookies:
@@ -120,7 +133,7 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
                 if debug:
                     logger.debug(f"Poll error: {str(e)}")
             time.sleep(0.01)
-        
+
         final_title = driver.title or "No title"
         final_url = driver.current_url or "No URL"
         raise TimeoutError(f"Timeout after {timeout}s. Last title: '{final_title}' | URL: {final_url}")
