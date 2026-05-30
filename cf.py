@@ -1,3 +1,4 @@
+# cf.py
 import subprocess
 import sys
 import time
@@ -52,33 +53,30 @@ def get_chrome_path():
         logger.info(f"✅ Chrome found via CHROME_PATH: {chrome_path}")
         return chrome_path
 
-    # 2. Auto-detect Playwright Chromium
+    # 2. Project-local browsers folder (persists across deploy)
+    project_paths = (
+        glob.glob("/opt/render/project/src/browsers/chromium*/chrome-linux64/chrome") +
+        glob.glob("/opt/render/project/src/browsers/chromium*/chrome-linux/chrome") +
+        glob.glob("/opt/render/project/src/browsers/chromium_headless_shell*/chrome-headless-shell-linux64/chrome-headless-shell")
+    )
+    for p in project_paths:
+        if os.path.exists(p):
+            logger.info(f"✅ Chrome found in project browsers: {p}")
+            return p
+
+    # 3. Playwright cache fallback
     playwright_paths = (
         glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux64/chrome") +
         glob.glob("/opt/render/.cache/ms-playwright/chromium*/chrome-linux/chrome") +
-        glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-headless-shell-linux64/chrome-headless-shell") +
-        glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-linux/headless_shell") +
-        glob.glob("/home/**/.cache/ms-playwright/chromium*/chrome-linux64/chrome", recursive=True) +
-        glob.glob("/root/.cache/ms-playwright/chromium*/chrome-linux64/chrome")
+        glob.glob("/opt/render/.cache/ms-playwright/chromium_headless_shell*/chrome-headless-shell-linux64/chrome-headless-shell")
     )
     for p in playwright_paths:
         if os.path.exists(p):
             logger.info(f"✅ Chrome found via Playwright cache: {p}")
             return p
 
-    # 3. Hardcoded known path from debug
-    known = "/opt/render/.cache/ms-playwright/chromium-1223/chrome-linux64/chrome"
-    if os.path.exists(known):
-        logger.info(f"✅ Chrome found at hardcoded path: {known}")
-        return known
-
-    # 4. Try system-wide Chrome
-    system_paths = [
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium"
-    ]
-    for p in system_paths:
+    # 4. System-wide Chrome
+    for p in ["/usr/bin/google-chrome", "/usr/bin/chromium-browser", "/usr/bin/chromium"]:
         if os.path.exists(p):
             logger.info(f"✅ Chrome found at system path: {p}")
             return p
@@ -95,7 +93,6 @@ def get_cloudflare_cookie(url: str, use_cache: bool = True, timeout: int = 30, d
     if not chrome_path:
         raise Exception("Chrome binary not found. Please set CHROME_PATH environment variable.")
 
-    # Make it executable and set environment variable for SeleniumBase
     os.chmod(chrome_path, 0o755)
     os.environ['CHROME_PATH'] = chrome_path
 
@@ -172,17 +169,28 @@ async def health_check():
 async def debug_chrome():
     try:
         result = subprocess.run(
-            ["find", "/opt/render/.cache/ms-playwright", "-name", "chrome", "-o", "-name", "chrome-headless-shell"],
+            ["find", "/opt/render/project/src/browsers", "-name", "chrome", "-o", "-name", "chrome-headless-shell"],
             capture_output=True, text=True, timeout=15
         )
         find_output = result.stdout
     except Exception as e:
         find_output = str(e)
 
+    try:
+        result2 = subprocess.run(
+            ["find", "/opt/render/.cache/ms-playwright", "-name", "chrome", "-o", "-name", "chrome-headless-shell"],
+            capture_output=True, text=True, timeout=15
+        )
+        find_cache = result2.stdout
+    except Exception as e:
+        find_cache = str(e)
+
     return {
         "cwd": os.getcwd(),
         "CHROME_PATH_env": os.environ.get("CHROME_PATH", "not set"),
-        "find_output": find_output,
+        "PLAYWRIGHT_BROWSERS_PATH": os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "not set"),
+        "find_project_browsers": find_output,
+        "find_playwright_cache": find_cache,
         "get_chrome_path_result": get_chrome_path()
     }
 
