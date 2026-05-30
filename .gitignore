@@ -1,0 +1,6 @@
+__pycache__/
+chrome_cache/
+.env
+.vscode/
+.idea/
+*.log
